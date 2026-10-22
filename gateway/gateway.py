@@ -1,4 +1,4 @@
-"""MQTT -> Azure IoT Hub gateway (runs on the Raspberry Pi next to Mosquitto).
+"""MQTT > Azure IoT Hub gateway (runs on the Raspberry Pi next to Mosquitto).
 
 Subscribes to iot25/+/telemetry, keeps the latest reading per ESP32 and sends each one to
 IoT Hub every SEND_EVERY seconds as {"deviceId","value","unit"} (the format the group's OPC UA
@@ -20,7 +20,7 @@ TOPIC = "iot25/+/telemetry"
 # free IoT Hub = 8,000 msgs/day; 2 boards x (temp + humidity) every 45 s = 7,680/day
 SEND_EVERY = float(os.getenv("SEND_EVERY", "45"))
 
-latest = {}            # deviceId -> {"deviceId","value","unit"}
+latest = {}            # deviceId > {"deviceId","value","unit"}
 lock = threading.Lock()
 
 
