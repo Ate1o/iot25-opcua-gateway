@@ -69,7 +69,7 @@ const pick = (o, ...keys) => { for (const k of keys) if (o[k] !== undefined) ret
 function normalise(d) {
   return {
     deviceId: pick(d, "deviceId", "DeviceId") ?? "?",
-    sensorType: pick(d, "sensorType", "SensorType") ?? "",
+    sensorType: pick(d, "sensorType", "SensorType") ?? ({ "°C": "temperatur", "%": "luftfuktighet" })[pick(d, "unit", "Unit")] ?? "",
     value: pick(d, "value", "Value"),
     unit: pick(d, "unit", "Unit") ?? "",
     measuredAtUtc: pick(d, "measuredAtUtc", "MeasuredAtUtc", "MeasuredAtUTC"),
