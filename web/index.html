@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IOT25 · OPC UA Telemetri</title>
+<style>
+  :root {
+    --bg: #0f1216; --card: #171b22; --line: #262c36; --text: #e4e7ee; --muted: #8b93a3;
+    --ok: #4fc3a1; --warn: #e6b450; --bad: #e5737a; --accent: #6ea8ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 20px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .status { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .pulse.err { background: var(--bad); }
+  main { padding: 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .name { font-weight: 650; overflow-wrap: anywhere; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
+  .online { color: var(--ok); } .stale, .waiting { color: var(--warn); } .offline { color: var(--bad); }
+  .value { font-size: 40px; font-weight: 700; margin: 14px 0 2px; font-variant-numeric: tabular-nums; transition: color .4s; }
+  .value.flash { color: var(--accent); }
+  .unit { font-size: 18px; color: var(--muted); margin-left: 4px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .empty { color: var(--muted); padding: 40px; grid-column: 1 / -1; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>IOT25 · Telemetri via OPC UA</h1>
+    <div class="sub">ESP32 > MQTT > Gateway / OPC UA-server > backend > webbapp</div>
+  </div>
+  <div class="status"><span id="dot" class="pulse"></span><span id="state">Ansluter…</span></div>
+</header>
+<main id="grid"><div class="empty">Väntar på data…</div></main>
+
+<script>
+// ---- Settings ----
+// "mock"  = fake data (develop without any backend)
+// any URL = the group's REST API, e.g. "https://<azure-app>/api/devices" or "/api/devices" (local_api.py)
+const params = new URLSearchParams(location.search);
+const API_URL = params.get("api") || (location.protocol === "file:" ? "mock" : "/api/devices");
+const REFRESH_MS = 3000;
+
+const grid = document.getElementById("grid");
+const dot = document.getElementById("dot");
+const state = document.getElementById("state");
+const previous = {};
+
+function mockData() {
+  const t = Date.now() / 10000;
+  const now = new Date().toISOString();
+  return [
+    { deviceId: "esp32-mhmood", sensorType: "temperature", value: +(21 + Math.sin(t) * 2).toFixed(2), unit: "°C", measuredAtUtc: now, status: "online" },
+    { deviceId: "esp32-carlos", sensorType: "humidity", value: +(45 + Math.cos(t) * 5).toFixed(1), unit: "%", measuredAtUtc: now, status: "online" },
+    { deviceId: "esp32-sally", sensorType: "temperature", value: 19.8, unit: "°C", measuredAtUtc: new Date(Date.now() - 60000).toISOString(), status: "stale" },
+    { deviceId: "esp32-oscar", status: "offline" },
+  ];
+}
+
+// accept both camelCase and PascalCase (DeviceId, Value, Unit, MeasuredAtUTC) from the API
+const pick = (o, ...keys) => { for (const k of keys) if (o[k] !== undefined) return o[k]; };
+function normalise(d) {
+  return {
+    deviceId: pick(d, "deviceId", "DeviceId") ?? "?",
+    sensorType: pick(d, "sensorType", "SensorType") ?? "",
+    value: pick(d, "value", "Value"),
+    unit: pick(d, "unit", "Unit") ?? "",
+    measuredAtUtc: pick(d, "measuredAtUtc", "MeasuredAtUtc", "MeasuredAtUTC"),
+    status: (pick(d, "status", "Status") ?? "online").toLowerCase(),
+  };
+}
+
+function ago(iso) {
+  if (!iso) return "–";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+  return s < 60 ? `${s} s sedan` : `${Math.round(s / 60)} min sedan`;
+}
+
+function render(devices) {
+  if (!devices.length) { grid.innerHTML = '<div class="empty">Inga enheter hittades.</div>'; return; }
+  grid.innerHTML = "";
+  for (const d of devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId))) {
+    const changed = previous[d.deviceId] !== undefined && previous[d.deviceId] !== d.value;
+    previous[d.deviceId] = d.value;
+    const card = document.createElement("div");
+    card.className = "card";
+    const value = typeof d.value === "number" ? d.value.toFixed(2).replace(/\.?0+$/, "") : "–";
+    card.innerHTML = `
+      <div class="top"><span class="name"></span><span class="badge ${d.status}">${d.status}</span></div>
+      <div class="value${changed ? " flash" : ""}">${value}<span class="unit"></span></div>
+      <div class="meta"></div>`;
+    card.querySelector(".name").textContent = d.deviceId;
+    card.querySelector(".unit").textContent = d.unit;
+    card.querySelector(".meta").textContent = `${d.sensorType || "sensor"} · uppdaterad ${ago(d.measuredAtUtc)}`;
+    grid.appendChild(card);
+    if (changed) setTimeout(() => card.querySelector(".value").classList.remove("flash"), 600);
+  }
+}
+
+async function refresh() {
+  try {
+    const raw = API_URL === "mock" ? mockData() : await (await fetch(API_URL, { cache: "no-store" })).json();
+    render(raw.map(normalise));
+    dot.className = "pulse";
+    state.textContent = `${API_URL === "mock" ? "Mockdata" : "Live"} · ${new Date().toLocaleTimeString("sv-SE")}`;
+  } catch (e) {
+    dot.className = "pulse err";
+    state.textContent = `Ingen kontakt med API (${API_URL})`;
+  }
+}
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

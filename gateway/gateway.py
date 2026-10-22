@@ -1,43 +1,70 @@
-"""MQTT -> OPC UA gateway on the Raspberry Pi.
+"""MQTT -> Azure IoT Hub gateway (runs on the Raspberry Pi next to Mosquitto).
 
-Subscribes to the device topic and keeps the latest value in an OPC UA node.
+Subscribes to iot25/+/telemetry, keeps the latest reading per ESP32 and sends each one to
+IoT Hub every SEND_EVERY seconds as {"deviceId","value","unit"} (the format the group's OPC UA
+server reads). Also prints every MQTT message, so it doubles as the local consumer.
+
+Env: IOTHUB_DEVICE_CONNECTION_STRING (required), MQTT_HOST, MQTT_USER, MQTT_PASS, SEND_EVERY (default 45)
 """
-import asyncio
 import json
 import os
+import threading
+import time
 
-from asyncua import Server
 import paho.mqtt.client as mqtt
+from azure.iot.device import IoTHubDeviceClient, Message
 
-DEVICE_ID = os.getenv("DEVICE_ID", "esp32-01")
-TOPIC = f"iot25/{DEVICE_ID}/telemetry"
+CONN = os.environ["IOTHUB_DEVICE_CONNECTION_STRING"]
+MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
+TOPIC = "iot25/+/telemetry"
+# free IoT Hub = 8,000 msgs/day; 2 boards x (temp + humidity) every 45 s = 7,680/day
+SEND_EVERY = float(os.getenv("SEND_EVERY", "45"))
+
+latest = {}            # deviceId -> {"deviceId","value","unit"}
+lock = threading.Lock()
 
 
-async def main():
-    server = Server()
-    await server.init()
-    server.set_endpoint("opc.tcp://0.0.0.0:4840/")
-    ns = await server.register_namespace("urn:iot25:group:gateway")
-    device = await server.nodes.objects.add_object(ns, DEVICE_ID)
-    value = await device.add_variable(ns, "Value", 0.0)
+def on_message(client, userdata, msg):
+    try:
+        d = json.loads(msg.payload)
+        reading = {"deviceId": str(d["deviceId"]), "value": float(d["value"]), "unit": str(d.get("unit", ""))}
+    except (ValueError, KeyError, TypeError):
+        print("ignored bad payload on", msg.topic, msg.payload[:120], flush=True)
+        return
+    print(f"MQTT  {msg.topic}  {reading}", flush=True)
+    with lock:
+        latest[reading["deviceId"]] = reading
 
-    loop = asyncio.get_running_loop()
 
-    def on_message(client, userdata, msg):
-        data = json.loads(msg.payload)
-        asyncio.run_coroutine_threadsafe(value.write_value(float(data["value"])), loop)
-        print("value", data["value"])
-
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    client.on_message = on_message
-    client.connect(os.getenv("MQTT_HOST", "localhost"), 1883)
+def on_connect(client, userdata, flags, rc):  # paho 1.x API (azure-iot-device pins paho<2)
+    if rc != 0:
+        print("MQTT refused, code", rc, flush=True)
+        return
+    print("MQTT connected, subscribing to", TOPIC, flush=True)
     client.subscribe(TOPIC)
-    client.loop_start()
-
-    # TODO: Unit, MeasuredAtUtc, Status nodes (agreed group structure)
-    async with server:
-        while True:
-            await asyncio.sleep(1)
 
 
-asyncio.run(main())
+m = mqtt.Client(client_id="mhmood-gateway")
+if os.getenv("MQTT_USER"):
+    m.username_pw_set(os.getenv("MQTT_USER"), os.getenv("MQTT_PASS"))
+m.on_connect, m.on_message = on_connect, on_message
+m.connect_async(MQTT_HOST, 1883, keepalive=30)
+m.loop_start()
+
+hub = IoTHubDeviceClient.create_from_connection_string(CONN, websockets=True)  # port 443, passes firewalls
+hub.connect()
+print(f"Azure IoT Hub connected, sending every {SEND_EVERY:g} s", flush=True)
+
+while True:
+    time.sleep(SEND_EVERY)
+    with lock:
+        batch = list(latest.values())
+        latest.clear()          # only send fresh readings
+    for reading in batch:
+        msg = Message(json.dumps(reading))
+        msg.content_type, msg.content_encoding = "application/json", "utf-8"
+        try:
+            hub.send_message(msg)
+            print(f"AZURE sent {reading}", flush=True)
+        except Exception as e:  # keep running if the internet drops
+            print("AZURE send failed:", e, flush=True)
