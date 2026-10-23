@@ -29,4 +29,4 @@ To run it with the group API: copy `web/index.html` into the API repo's `web/` f
 
 ## Update notes
 - **2026-10-22:** Gateway now goes through Azure IoT Hub, matching the group's OPC UA server. First working version of the web app added in `web/`.
-- **Next for the web app (Carlos):** move the page into the group API repo, group temperature and humidity per ESP32 in one card, history chart per device, design and mobile layout, and the web app section of the README.
+- **Possible next steps for the web app:** one card per ESP32 (temperature and humidity together), a history chart per device, mobile layout.
