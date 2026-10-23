@@ -58,9 +58,9 @@ function mockData() {
   const now = new Date().toISOString();
   return [
     { deviceId: "esp32-mhmood", sensorType: "temperature", value: +(21 + Math.sin(t) * 2).toFixed(2), unit: "°C", measuredAtUtc: now, status: "online" },
-    { deviceId: "esp32-carlos", sensorType: "humidity", value: +(45 + Math.cos(t) * 5).toFixed(1), unit: "%", measuredAtUtc: now, status: "online" },
-    { deviceId: "esp32-sally", sensorType: "temperature", value: 19.8, unit: "°C", measuredAtUtc: new Date(Date.now() - 60000).toISOString(), status: "stale" },
-    { deviceId: "esp32-oscar", status: "offline" },
+    { deviceId: "esp32-02", sensorType: "humidity", value: +(45 + Math.cos(t) * 5).toFixed(1), unit: "%", measuredAtUtc: now, status: "online" },
+    { deviceId: "esp32-03", sensorType: "temperature", value: 19.8, unit: "°C", measuredAtUtc: new Date(Date.now() - 60000).toISOString(), status: "stale" },
+    { deviceId: "esp32-04", status: "offline" },
   ];
 }
 
